@@ -373,7 +373,7 @@ class FSDPWorker(Worker):
                 offload_fsdp_model(self.ref_fsdp_module)
                 print_gpu_memory_usage(f"After offload {role} model during init")
 
-    def _build_model_optimizer_diffusion(self, model_config: ModelConfig, fsdp_config: FSDPConfig, optim_config: Optional[OptimConfig], padding_free: bool, role: Literal["actor", "critic", "ref"]):
+    def _build_model_optimizer_diffusion(self, model_config: ModelConfig, fsdp_config: FSDPConfig, optim_config: Optional[OptimConfig], role: Literal["actor", "critic", "ref"]):
         if role != "ref":  # ref model's tokenizer is same as actor
             self.processor = get_processor(
                 model_config.model_path,
