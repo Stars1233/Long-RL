@@ -87,7 +87,7 @@ worker:
     ulysses_size: 1
     diffusion: true
     guidance_scale: 4.5
-    scheduler: Wan-AI/Wan2.1-T2V-1.3B-Diffusers
+    scheduler: Wan-AI/Wan2.1-T2V-1.3B-Diffusers/scheduler
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
