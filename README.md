@@ -16,18 +16,20 @@
 ## TABLE OF CONTENTS
 1. [News](#news)
 2. [Highlights](#highlights)
-3. [Introduction](#Introduction)
-4. [Installation](#installation-and-quick-guide)
-5. [Training](#training)
-6. [Evaluation](#evaluation)
-7. [Examples](#examples)
-8. [How to contribute](#how-to-contribute)
-9. [Core Contributors](#Core-Contributors)
-10. [Citation](#citation)
-11. [Acknowledgement](#acknowledgement)
+3. [Introduction](#introduction)
+4. [Supported Features](#supported-features)
+5. [Installation](#installation)
+6. [Training](#training)
+7. [Evaluation](#evaluation)
+8. [Examples](#examples)
+9. [How to contribute](#how-to-contribute)
+10. [Core Contributors](#core-Contributors)
+11. [Citation](#citation)
+12. [Acknowledgement](#acknowledgement)
 
 
 ## News
+- [x] [2025.7.18] We release new supported features, including *Open-ended reward*, *Cached video embeddings*, and *Chunked gathering* as introduced in [Supported Features](#supported-features).
 - [x] [2025.7.10] We release [Paper](https://arxiv.org/abs/2507.07966) and this GitHub repo [Long-RL](https://github.com/NVlabs/Long-RL).
 
 ## Highlights
@@ -36,7 +38,7 @@
 3. **Image/video generation RL**:  We supports RL training on image/video generation models, like [Stable Diffusion](https://huggingface.co/stabilityai/stable-diffusion-3.5-medium) and [Wan](https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers) series models. `examples/new_supports/sd3_image_grpo.sh` and `examples/new_supports/wan_video_grpo.sh`.
 
 ## Introduction
-Support models:
+**Support models**:
 - [x] VILA series models on image and video, with SP support
   - `examples/new_supports/nvila_2b_clevr_grpo.sh`
   - `examples/new_supports/nvila_2b_video_grpo.sh`
@@ -49,11 +51,24 @@ Support models:
   - `examples/new_supports/sd3_image_grpo.sh`
   - `examples/new_supports/wan_video_grpo.sh`
     
-Support algorithms:
+**Support algorithms**:
 - [x] In addition to GRPO, DAPO & Reinforce supported, with SP support
   - `examples/new_supports/qwen2_5_vl_3b_video_dapo.sh`
   - `examples/new_supports/qwen2_5_vl_3b_video_grpo.sh`
   - `examples/new_supports/qwen2_5_vl_3b_video_reinforce.sh`
+
+## Supported Features
+- [x] **Open-ended reward**: 
+- We support training for open-ended QAs (non-multi-choices QAs). Please do the following steps if you neet it.
+  - Set `--worker.rollout.open_ended_reward=True` in the training script.
+  - Export your openai API with `export OPENAI_API_KEY=xxx`.
+- [x] **Cached video embeddings**:
+- We support using cached video embeddings for video RL training. Because video encoding during training is slow for large batch & long video frames. Please do the following steps if you neet it.
+  - Follow `verl/utils/cache_video_embeds_vila.py` to cache video embeddings in a local directory.
+  - Set `--data.cache_dir` and `--worker.actor.cached_embeds_dir` in the training script.
+- [x] **Chunked gathering**:
+- We support chunked gathering for `all_gather_data_proto`. Because it might suffer from CPU OOM if you machine do not have enought CPU memory, and also large batches or long video frames are needed. Please do the following step if you neet it.
+  - Set `--worker.rollout.num_chunk_seq` in the training script. It can be 8/16/32. Larger ones cost less memory, but more time.
 
 **Scaling RL to Long Videos [[Paper](https://arxiv.org/abs/2507.07966)]** <br />
 [Yukang Chen](https://yukangchen.com/), [Wei Huang](https://aaron-weihuang.com/), [Baifeng Shi](https://bfshi.github.io/), [Qinghao Hu](https://tonyhao.xyz/), [Hanrong Ye](https://sites.google.com/site/yhrspace/home), [Ligeng Zhu](https://lzhu.me/), [Zhijian Liu](https://zhijianliu.com), [Pavlo Molchanov](https://www.pmolchanov.com/), [Jan Kautz](https://jankautz.com), [Xiaojuan Qi](https://xjqi.github.io/), [Sifei Liu](https://sifeiliu.net/),[Hongxu Yin](https://hongxu-yin.github.io/), [Yao Lu](https://scholar.google.com/citations?user=OI7zFmwAAAAJ&hl=en), [Song Han](http://songhan.mit.edu/) <br />
@@ -187,4 +202,3 @@ Please consider to cite our paper and this framework, if they are helpful in you
 - [verl](https://github.com/volcengine/verl): the RL training framework we built upon.
 - [vllm](https://github.com/vllm-project/vllm): we built upon vllm for the rollout engine.
 - [Flow-GRPO](https://github.com/yifan123/flow_grpo): we refer to the Flow-GRPO for the image/video generation RL part.
-
