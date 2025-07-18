@@ -196,7 +196,6 @@ class vLLMRollout(BaseRollout):
 
         print(f"Sampling params: {sampling_kwargs}.")
         self.sampling_params = SamplingParams(**sampling_kwargs)
-        self.sampling_params.stop = "</s>"
         self.sampling_params.detokenize = True
         self.prompt_length = config.prompt_length
         self.padding_free = config.padding_free
@@ -233,7 +232,9 @@ class vLLMRollout(BaseRollout):
         batch_multi_modal_data = non_tensor_batch.pop("multi_modal_data", None)
         if batch_size != len(batch_raw_prompt_ids):
             raise RuntimeError("vllm sharding manager is not work properly.")
-
+        if self.vila_model:
+            self.sampling_params.stop = "</s>"
+            
         # TODO: collect input embeds for reuse
         if batch_multi_modal_data is not None:
             min_pixels, max_pixels = prompts.meta_info["min_pixels"], prompts.meta_info["max_pixels"]
