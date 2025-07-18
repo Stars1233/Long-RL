@@ -57,6 +57,9 @@ class RolloutConfig:
     width: int = 832
     audio_max_length: int = 10000  # max length of audio feature, used for padding in dataset
     num_chunk_seq: int = -1
+    bs_vllm: int = -1
+    use_cached_embeds: bool = False
+    open_ended_reward: bool = False
 
     def to_dict(self):
         return asdict(self)

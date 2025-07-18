@@ -113,7 +113,7 @@ class ActorConfig:
     diffusion: bool = False
     guidance_scale: float = 4.5
     scheduler: str = ""
-
+    cached_embeds_dir: str = ""
 
 @dataclass
 class RefConfig:
@@ -129,3 +129,4 @@ class RefConfig:
     diffusion: bool = False
     guidance_scale: float = 4.5
     scheduler: str = ""
+    cached_embeds_dir: str = ""

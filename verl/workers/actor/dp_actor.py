@@ -20,6 +20,7 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 import torch
+import numpy as np
 from einops import rearrange
 from ray.experimental.tqdm_ray import tqdm
 from torch import nn
@@ -50,25 +51,43 @@ except ImportError:
 
 import torch.nn.functional as F
 import torch.distributed as dist
+from collections import Counter
 from verl.utils.vila_remote_code.constants import IGNORE_INDEX
 
 __all__ = ["DataParallelPPOActor"]
-NUM_TOKENS_PER_IMAGE = 257  # (256+1)
 
+def most_common_index(lst):
+    if not lst:
+        return None, None
+    counter = Counter(lst)
+    most_common_value, _ = counter.most_common(1)[0]
+    index = lst.index(most_common_value)
+    return most_common_value, index
 
-def extract_local_from_list(value_list, sp_rank, sp_size):
-    quotient, remainder = divmod(len(value_list), sp_size)
-    start_idx = sp_rank * quotient + min(sp_rank, remainder)
-    end_idx = (sp_rank + 1) * quotient + min(sp_rank + 1, remainder)
-    return value_list[start_idx:end_idx]
+def get_unique_and_indices(str_list):
+    unique_list = []
+    index_map = {}
+    indices = []
 
-def left_pad(x, target_len, dim=-1, value=0):
-    pad_len = target_len - x.size(dim)
-    if pad_len <= 0:
-        return x
-    pad = [0] * (2 * x.ndim)
-    pad[-2 * dim - 1] = pad_len
-    return F.pad(x, pad, value=value)
+    for item in str_list:
+        if item not in index_map:
+            index_map[item] = len(unique_list)
+            unique_list.append(item)
+        indices.append(index_map[item])
+
+    return unique_list, indices
+
+def get_unique_videos(videos, cached_embeds_dir):
+    videos_unique, videos_indices = get_unique_and_indices(videos)
+    videos_embeds_unique = [torch.load(os.path.join(cached_embeds_dir, "%s.pt" % video.split(".")[0])) for video in videos_unique]
+    videos_length = [video_embed.size(0) for video_embed in videos_embeds_unique]
+    most_common_value, index = most_common_index(videos_length)
+    video_right = videos_embeds_unique[index]
+
+    for i in range(len(videos_embeds_unique)):
+        if videos_embeds_unique[i].size(0) != most_common_value:
+            videos_embeds_unique[i] = video_right
+    return videos_embeds_unique, videos_indices
 
 def prepare_inputs_for_sp(inputs: torch.Tensor, attention_mask: torch.Tensor, response_length: int, position_ids: torch.Tensor=None,
                           responses: torch.Tensor=None, sp_size: int = 1, sp_rank: int = 0, padding_id: int = -1):
@@ -94,7 +113,7 @@ def prepare_inputs_for_sp(inputs: torch.Tensor, attention_mask: torch.Tensor, re
     return local_inputs, local_attention_mask, local_position_ids.contiguous(), local_responses, seqlens_in_batch
 
 def prepare_inputs_for_sp_mm(inputs: torch.Tensor, attention_mask: torch.Tensor, multi_modal_labels: torch.Tensor, response_length: int, position_ids: torch.Tensor=None,
-                          responses: torch.Tensor=None, sp_size: int = 1, sp_rank: int = 0, visual_id: int = IGNORE_INDEX, padding_id: int = -1, vila_model: bool = False):
+                          responses: torch.Tensor=None, sp_size: int = 1, sp_rank: int = 0, visual_id: int = IGNORE_INDEX, padding_id: int = 0, vila_model: bool = False):
     image_labels = multi_modal_labels == visual_id
     video_token_num = image_labels[0].sum()
     input_text_length = image_labels.size(1) - video_token_num
@@ -214,6 +233,8 @@ class DataParallelPPOActor(BasePPOActor):
             self.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(scheduler)
         else:
             self._forward_micro_batch = self._forward_micro_batch_ori
+
+        self.cached_embeds_dir = config.cached_embeds_dir
 
     def _forward_micro_batch_ori(self, micro_batch: Dict[str, torch.Tensor], temperature: float) -> torch.Tensor:
         """
@@ -366,6 +387,7 @@ class DataParallelPPOActor(BasePPOActor):
         Returns:
             log_probs: # (bs, response_len)
         """
+        input_ids = micro_batch["input_ids"]
         attention_mask = micro_batch["attention_mask"]
         responses = micro_batch["responses"]
         response_length = responses.size(-1)
@@ -374,12 +396,15 @@ class DataParallelPPOActor(BasePPOActor):
             dummy_input = torch.tensor([[1] * self.config.ulysses_size], dtype=torch.int64, device=self.actor_module.device)
             dummy_attention_mask = torch.tensor([[1] * self.config.ulysses_size], dtype=torch.bool, device=self.actor_module.device)
             _ = self.actor_module(input_ids=dummy_input, attention_mask=dummy_attention_mask)
-        response_embeds = self.actor_module.model.embed_tokens(responses)
-        multi_modal_embeds = torch.from_numpy(micro_batch["multi_modal_embeds"]).to(device=response_embeds.device, dtype=response_embeds.dtype)
-        multi_modal_labels = torch.from_numpy(micro_batch["multi_modal_labels"]).to(device=response_embeds.device, dtype=response_embeds.dtype)
-        attention_mask_embeds = multi_modal_labels != -1
-        multi_modal_embeds = torch.cat([multi_modal_embeds, response_embeds], dim=1)
-        attention_mask = torch.cat([attention_mask_embeds, attention_mask[:, -response_length:]], dim=1)
+        input_embeds = self.actor_module.model.embed_tokens(input_ids)
+        if isinstance(micro_batch["multi_modal_embeds"], np.ndarray):
+            micro_batch["multi_modal_embeds"] = torch.from_numpy(micro_batch["multi_modal_embeds"])
+        video_embeds = micro_batch["multi_modal_embeds"].to(device=input_embeds.device, dtype=input_embeds.dtype)
+
+        multi_modal_embeds = torch.cat([input_embeds[:, :-response_length], video_embeds, input_embeds[:, -response_length:]], dim=1)
+        attention_mask_video = torch.ones((video_embeds.size(0), video_embeds.size(1)), dtype=torch.bool, device=attention_mask.device)
+        multi_modal_labels = torch.cat([attention_mask[:, :-response_length], attention_mask_video.float() * IGNORE_INDEX], dim=1)
+        attention_mask = torch.cat([attention_mask[:, :-response_length], attention_mask_video,  attention_mask[:, -response_length:]], dim=1)
 
         # multi_modal_labels==IGNORE_INDEX: image embeds
         # multi_modal_labels==1: text embeds
@@ -390,7 +415,7 @@ class DataParallelPPOActor(BasePPOActor):
             responses_padded = F.pad(responses, (attention_mask.size(-1) - response_length, 0), value=-100)
             local_multi_modal_embeds, local_attention_mask, local_position_ids, local_responses, seqlens_in_batch = (
                 prepare_inputs_for_sp_mm(multi_modal_embeds, attention_mask, multi_modal_labels, response_length,
-                                         responses=responses_padded, sp_size=self.config.ulysses_size, sp_rank=sp_rank, vila_model=True))
+                                         responses=responses_padded, sp_size=self.config.ulysses_size, sp_rank=sp_rank, vila_model=True, padding_id=0))
         else:
             local_multi_modal_embeds = multi_modal_embeds
             local_attention_mask = attention_mask
@@ -477,11 +502,24 @@ class DataParallelPPOActor(BasePPOActor):
 
         temperature = data.meta_info["temperature"]
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
-        non_tensor_select_keys = ["multi_modal_embeds", "multi_modal_labels"] if self.vila_model else ["multi_modal_inputs"]
+        if self.vila_model:
+            non_tensor_select_keys = ["multi_modal_embeds"] if "multi_modal_embeds" in data.non_tensor_batch  else ["videos"]
+        else:
+            non_tensor_select_keys = ["multi_modal_inputs"]
 
-        micro_batches = data.select(select_keys, non_tensor_select_keys).split(
-            self.config.micro_batch_size_per_device_for_experience
-        )
+        data_selected = data.select(select_keys, non_tensor_select_keys)
+        if "videos" in non_tensor_select_keys:
+            videos = data_selected.non_tensor_batch.pop("videos")
+            assert os.path.exists(self.cached_embeds_dir), "We must have cached video embeds when use it."
+            videos_embeds_unique, videos_indices = get_unique_videos(videos, self.cached_embeds_dir)
+            data_selected.non_tensor_batch["videos_indices"] = videos_indices
+
+        micro_batches = data_selected.split(self.config.micro_batch_size_per_device_for_experience)
+        if "videos" in non_tensor_select_keys:
+            for i in range(len(micro_batches)):
+                videos_indices = micro_batches[i].non_tensor_batch.pop("videos_indices")
+                micro_batches[i].non_tensor_batch["multi_modal_embeds"] = torch.stack([videos_embeds_unique[i] for i in videos_indices])
+
         log_probs_lst = []
         if self.rank == 0:
             micro_batches = tqdm(micro_batches, desc="Compute log probs", position=1)
@@ -535,11 +573,24 @@ class DataParallelPPOActor(BasePPOActor):
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         select_keys.extend(["old_log_probs", "ref_log_probs", "advantages"])
-        non_tensor_select_keys = ["multi_modal_embeds", "multi_modal_labels"] if self.vila_model else ["multi_modal_inputs"]
 
-        # Split to make minibatch iterator for updating the actor
-        # See PPO paper for details. https://arxiv.org/abs/1707.06347
-        mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
+        if self.vila_model:
+            non_tensor_select_keys = ["multi_modal_embeds"] if "multi_modal_embeds" in data.non_tensor_batch else ["videos"]
+        else:
+            non_tensor_select_keys = ["multi_modal_inputs"]
+
+        data_selected = data.select(select_keys, non_tensor_select_keys)
+        if "videos" in non_tensor_select_keys:
+            videos = data_selected.non_tensor_batch.pop("videos")
+            assert os.path.exists(self.cached_embeds_dir), "We must have cached video embeds when use it."
+            videos_embeds_unique, videos_indices = get_unique_videos(videos, self.cached_embeds_dir)
+            data_selected.non_tensor_batch["videos_indices"] = videos_indices
+
+        mini_batches = data_selected.split(self.config.global_batch_size_per_device)
+        if "videos" in non_tensor_select_keys:
+            for i in range(len(mini_batches)):
+                videos_indices = mini_batches[i].non_tensor_batch.pop("videos_indices")
+                mini_batches[i].non_tensor_batch["multi_modal_embeds"] = torch.stack([videos_embeds_unique[i] for i in videos_indices])
 
         metrics = defaultdict(list)
         for _ in range(self.config.ppo_epochs):

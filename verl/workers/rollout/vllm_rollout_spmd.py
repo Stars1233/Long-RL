@@ -13,12 +13,14 @@
 # limitations under the License.
 
 import os
+import re
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union
 
-import numpy as np
 import torch
 import torch.distributed
+import numpy as np
+from tqdm import tqdm
 from tensordict import TensorDict
 from transformers import PreTrainedTokenizer, ProcessorMixin
 from vllm import LLM, RequestOutput, SamplingParams
@@ -30,8 +32,8 @@ from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
 import torch.nn.functional as F
-from verl.utils.vila_remote_code.constants import IGNORE_INDEX
-
+from ...utils.vila_remote_code.constants import IGNORE_INDEX
+from ...utils.gpt_api import generate_gpt
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, np.ndarray]:
     # repeat the elements, supports both tensor and numpy array
@@ -63,49 +65,19 @@ def _process_multi_modal_data(multi_modal_data: Dict[str, Any], min_pixels: int,
 
     return None
 
-def _sample_video_embeds(
-    inputs_embeds: torch.Tensor,
-    video_token_mask: torch.Tensor,
-    num_frames: int,
-    num_samples: int,
-) -> torch.Tensor:
-    """
-    Uniformly sample video embeddings per frame and write them back to inputs_embeds.
+def format_reward(response: str) -> float:
+    pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
+    format_match = re.fullmatch(pattern, response)
+    return 1.0 if format_match else 0.0
 
-    Args:
-        inputs_embeds (Tensor): (B, T, D)
-        video_token_mask (Tensor): (B, T), 1 where it's a video token
-        num_frames (int): number of original video frames
-        num_samples (int): number of frames to sample
-
-    Returns:
-        Tensor: updated inputs_embeds (B, T, D) with video tokens replaced by sampled ones
-    """
-    B, T, D = inputs_embeds.shape
-    updated_embeds = []
-
-    for b in range(B):
-        mask = video_token_mask[b]  # (T,)
-        video_indices = torch.nonzero(mask, as_tuple=False).squeeze(-1)  # (N_video_tokens,)
-        N_video_tokens = video_indices.size(0)
-        start, end = video_indices[0].item(), video_indices[-1].item() + 1
-
-        assert N_video_tokens % num_frames == 0, "Mismatch in video token count and frame count"
-        tokens_per_frame = N_video_tokens // num_frames
-        assert num_samples <= num_frames, "Cannot sample more frames than available"
-
-        video_embeds = inputs_embeds[b, video_indices]  # (N_video_tokens, D)
-
-        video_embeds = video_embeds.view(num_frames, tokens_per_frame, D)
-
-        sample_idx = torch.linspace(0, num_frames - 1, steps=num_samples, device=inputs_embeds.device).round().long()
-        sampled_embeds = video_embeds[sample_idx]  # (num_samples, tokens_per_frame, D)
-
-        sampled_embeds = sampled_embeds.view(-1, D)  # (num_samples * tokens_per_frame, D)
-        updated_embed = torch.cat([inputs_embeds[b, :start], sampled_embeds, inputs_embeds[b, end:]])
-        updated_embeds.append(updated_embed)
-    updated_embeds = torch.stack(updated_embeds, dim=0)
-    return updated_embeds
+OPEN_ENDED_PROMPT = (
+    "Compare the following two sentences and determine whether they convey generally similar meanings.\n\n"
+    "Respond with only one word: 'Yes' if they are broadly similar or express related ideas (even if wording or details differ), "
+    "or 'No' if they are unrelated.\n\n"
+    "Sentence 1: '{pred_answer}'\n"
+    "Sentence 2: '{ground_truth}'\n\n"
+    "Answer:"
+)
 
 class vLLMRollout(BaseRollout):
     def __init__(
@@ -196,11 +168,15 @@ class vLLMRollout(BaseRollout):
 
         print(f"Sampling params: {sampling_kwargs}.")
         self.sampling_params = SamplingParams(**sampling_kwargs)
-        self.sampling_params.detokenize = True
         self.prompt_length = config.prompt_length
         self.padding_free = config.padding_free
         self.group_frames = config.group_frames
         self.num_chunk_seq = config.num_chunk_seq
+        self.bs_vllm = config.bs_vllm
+        self.use_cached_embeds = config.use_cached_embeds
+        self.tokenizer = tokenizer
+        self.open_ended_reward = config.open_ended_reward
+        self.format_weight = 0.1
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -232,42 +208,27 @@ class vLLMRollout(BaseRollout):
         batch_multi_modal_data = non_tensor_batch.pop("multi_modal_data", None)
         if batch_size != len(batch_raw_prompt_ids):
             raise RuntimeError("vllm sharding manager is not work properly.")
-        if self.vila_model:
-            self.sampling_params.stop = "</s>"
-            
+
         # TODO: collect input embeds for reuse
         if batch_multi_modal_data is not None:
             min_pixels, max_pixels = prompts.meta_info["min_pixels"], prompts.meta_info["max_pixels"]
             vllm_inputs = []
             batch_multi_modal_embeds = []
-            batch_multi_modal_labels = []
-            batch_pad_lengths = []
             for raw_prompt_ids, multi_modal_data in zip(batch_raw_prompt_ids, batch_multi_modal_data):
                 if self.vila_model:
-                    batch_pad_lengths.append(self.prompt_length - len(raw_prompt_ids))
                     _raw_prompt_ids = torch.Tensor(list(raw_prompt_ids)).long().unsqueeze(0).to(self.model_vision_encoder.device)
                     vision_key = list(multi_modal_data.keys())[0]
                     _dtype = multi_modal_data[vision_key][0].dtype
                     multi_modal_data[vision_key] = [_data.to(self.model_vision_encoder.dtype) for _data in multi_modal_data[vision_key]]
-                    num_video_frames = multi_modal_data[vision_key][0].size(0)
                     labels = torch.full(_raw_prompt_ids.shape, 1, dtype=_raw_prompt_ids.dtype, device=_raw_prompt_ids.device)
                     media_config = {vision_key: {"frames_split": multi_modal_data[vision_key][0].shape[0] // self.group_frames if "video" in vision_key and self.group_frames>0 else 0}}
                     inputs_embeds, labels, _ = self.model_vision_encoder._embed(_raw_prompt_ids, multi_modal_data, media_config, labels ,None)
-                    if self.max_frames_vllm < num_video_frames:
-                        resized_embeds = _sample_video_embeds(inputs_embeds, labels==IGNORE_INDEX, num_video_frames, self.max_frames_vllm)
-                    else:
-                        resized_embeds = inputs_embeds
 
-                    inputs_embeds = inputs_embeds.squeeze(0)
-                    resized_embeds = resized_embeds.squeeze(0)
-                    batch_multi_modal_embeds.append(inputs_embeds.to(_dtype).cpu())
-                    batch_multi_modal_labels.append(labels.squeeze(0).to(_dtype).cpu())
-                    l = resized_embeds.shape[0]
-                    prompt_token_ids = list(raw_prompt_ids)
-                    if len(prompt_token_ids) < l:
-                        prompt_token_ids.extend([0] * (l - len(prompt_token_ids)))
-                    assert len(prompt_token_ids) == l, "The length of prompt_token_ids must match l."
-                    vllm_inputs.append({"prompt_embeds":resized_embeds })
+                    if not self.use_cached_embeds:
+                        resized_embeds = inputs_embeds[labels==IGNORE_INDEX].contiguous()
+                        batch_multi_modal_embeds.append(resized_embeds.to(_dtype).cpu())
+
+                    vllm_inputs.append({"prompt_embeds":inputs_embeds.squeeze(0)})
                 else:
                     if "audio" in multi_modal_data:
                         vllm_inputs.append(
@@ -285,22 +246,30 @@ class vLLMRollout(BaseRollout):
                             }
                         )
             if len(batch_multi_modal_embeds) > 0 and not self.padding_free:
+                batch_lengths = [multi_modal_embeds.size(0) for multi_modal_embeds in batch_multi_modal_embeds]
+                batch_pad_lengths = [max(batch_lengths) - length for length in batch_lengths]
                 for i in range(len(batch_multi_modal_embeds)):
-                    pad_len = batch_pad_lengths[i]
-                    if pad_len > 0:
-                        batch_multi_modal_embeds[i] = F.pad(batch_multi_modal_embeds[i], pad=(0, 0, pad_len, 0), value=0.0)
-                        batch_multi_modal_labels[i] = F.pad(batch_multi_modal_labels[i], pad=(pad_len, 0), value=-1)
+                    if batch_pad_lengths[i] > 0:
+                        batch_multi_modal_embeds[i] = F.pad(batch_multi_modal_embeds[i], pad=(0, 0, 0, batch_pad_lengths[i]), value=0.0)
         else:
             vllm_inputs = [{"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids]
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
-            completions: List[RequestOutput] = self.inference_engine.generate(
-                prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=False
-            )
-            response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+            if self.bs_vllm > 0:
+                completions = []
+                for i in tqdm(range(0, len(vllm_inputs), self.bs_vllm)):
+                    batch = vllm_inputs[i:i + self.bs_vllm]
+                    completions.extend(self.inference_engine.generate(
+                        prompts=batch, sampling_params=self.sampling_params, use_tqdm=False
+                    ))
+            else:
+                completions: List[RequestOutput] = self.inference_engine.generate(
+                    prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=False
+                )
+            response_ids_nopad = [output.token_ids for completion in completions for output in completion.outputs]
             response_ids = VF.pad_2d_list_to_length(
-                response_ids, self.pad_token_id, max_length=self.config.response_length
+                response_ids_nopad, self.pad_token_id, max_length=self.config.response_length
             ).to(input_ids.device)
 
             if self.sampling_params.n > 1:
@@ -308,10 +277,40 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+                ground_truth = _repeat_interleave(non_tensor_batch["ground_truth"], self.sampling_params.n)
                 if batch_multi_modal_data is not None:
                     batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, self.sampling_params.n)
+                if len(batch_multi_modal_embeds) > 0:
                     batch_multi_modal_embeds = _repeat_interleave(batch_multi_modal_embeds, self.sampling_params.n)
-                    batch_multi_modal_labels = _repeat_interleave(batch_multi_modal_labels, self.sampling_params.n)
+
+            if self.open_ended_reward:
+                responses = self.tokenizer.batch_decode(response_ids, skip_special_tokens=True)
+                format_scores = [format_reward(response) for response in responses]
+
+                pred_answers = []
+
+                for response in responses:
+                    content_match = re.search(r"<answer>(.*?)</answer>", response)
+                    if content_match:
+                        pred_answers.append(content_match.group(1).strip())
+                    else:
+                        pred_answers.append(response.strip())
+
+                judge_prompts = []
+                for i in range(len(responses)):
+                    judge_prompts.append(OPEN_ENDED_PROMPT.format(pred_answer=pred_answers[i], ground_truth=ground_truth[i]))
+
+                judges = [generate_gpt(prompt) for prompt in judge_prompts]
+                accuracy_scores = [1.0 if "yes" in judge.lower() else 0.0 for judge in judges]
+
+                rewards = []
+                for i in range(len(judges)):
+                    rewards.append({
+                        "overall": (1 - self.format_weight) * accuracy_scores[i] + self.format_weight * format_scores[i],
+                        "format": format_scores[i],
+                        "accuracy": accuracy_scores[i],
+                    })
+
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -346,10 +345,13 @@ class vLLMRollout(BaseRollout):
             non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}
             if len(batch_multi_modal_embeds) > 0:
                 non_tensor_batch["multi_modal_embeds"] = batch_multi_modal_embeds
-                non_tensor_batch["multi_modal_labels"] = batch_multi_modal_labels
         else:
             non_tensor_batch = {}
 
+        if self.open_ended_reward:
+            non_tensor_batch["rewards"] = rewards
+
+        non_tensor_batch["ground_truth"] = ground_truth
         prompts.meta_info["num_repeat"] = self.sampling_params.n
         prompts.meta_info["num_chunk_seq"] = self.num_chunk_seq
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info=prompts.meta_info)

@@ -116,6 +116,7 @@ class FSDPWorker(Worker):
             self.config.actor.vila_model = True
             self.config.ref.vila_model = True
 
+        self.config.ref.cached_embeds_dir = self.config.actor.cached_embeds_dir
         self.diffusion = self.config.actor.diffusion
 
     def _init_dist_mesh(self, config: Union[ActorConfig, CriticConfig], role: Literal["actor", "critic"]):
@@ -533,6 +534,7 @@ class FSDPWorker(Worker):
             raise ValueError(f"rollout world size {self.world_size} is not divisible by tp size {tp_size}.")
 
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=("dp", "tp"))
+        self.config.rollout.use_cached_embeds = len(self.config.actor.cached_embeds_dir)
         self.rollout = vLLMRollout(
             model_path=self.config.actor.model.model_path,
             config=self.config.rollout,

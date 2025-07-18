@@ -87,17 +87,20 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         response_ids = data.batch["responses"]
         response_length = data.batch["response_mask"].sum(dim=-1)
         for i in range(len(data)):
-            valid_response_ids = response_ids[i][: response_length[i]]
-            response_str = self.tokenizer.decode(
-                valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
-            )
-            score = self.reward_fn(
-                {
-                    "response": response_str,
-                    "response_length": response_length[i],
-                    "ground_truth": data.non_tensor_batch["ground_truth"][i],
-                }
-            )
+            if "rewards" in data.non_tensor_batch:
+                score = data.non_tensor_batch["rewards"][i]
+            else:
+                valid_response_ids = response_ids[i][: response_length[i]]
+                response_str = self.tokenizer.decode(
+                    valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
+                )
+                score = self.reward_fn(
+                    {
+                        "response": response_str,
+                        "response_length": response_length[i],
+                        "ground_truth": data.non_tensor_batch["ground_truth"][i],
+                    }
+                )
             reward_tensor[i, response_length[i] - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
