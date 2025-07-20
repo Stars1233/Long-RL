@@ -77,7 +77,7 @@ We addresses the unique challenges of long video reasoning by integrating three 
   - Follow `verl/utils/cache_video_embeds_vila.py` to cache video embeddings in a local directory.
   - Set `--data.cache_dir` and `--worker.actor.cached_embeds_dir` in the training script.
 - [x] **Chunked gathering**:
-- We support chunked gathering for `all_gather_data_proto`. Because it might suffer from CPU OOM if you machine do not have enought CPU memory, and also large batches or long video frames are needed. Please do the following step if you neet it.
+- We support chunked gathering for `all_gather_data_proto`. Because it might suffer from CPU OOM if you machine do not have enough CPU memory, and also large batches or long video frames are needed. Please do the following step if you neet it.
   - Set `--worker.rollout.num_chunk_seq` in the training script. It can be 8/16/32. Larger ones cost less memory, but more time.
 
 ## Installation
