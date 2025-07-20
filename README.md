@@ -20,7 +20,7 @@
 4. [Supported Features](#supported-features)
 5. [Installation](#installation)
 6. [Training](#training)
-7. [Evaluation](#evaluation)
+7. [LongVideo-Reason](#longvideo-reason)
 8. [Examples](#examples)
 9. [How to contribute](#how-to-contribute)
 10. [Core Contributors](#core-Contributors)
@@ -29,6 +29,7 @@
 
 
 ## News
+- [x] [2025.7.19] We release a detailed instruction and scripts for the data generation process of our LongVideo-Reason dataset in the [`longvideo-reason`](longvideo-reason/) directory.
 - [x] [2025.7.18] We release new supported features, including *Open-ended reward*, *Cached video embeddings*, and *Chunked gathering* as introduced in [Supported Features](#supported-features).
 - [x] [2025.7.10] We release [Paper](https://arxiv.org/abs/2507.07966) and this GitHub repo [Long-RL](https://github.com/NVlabs/Long-RL).
 
@@ -118,8 +119,8 @@ This follows the ways in the EasyR1 repo.
 python3 scripts/model_merger.py --local_dir checkpoints/easy_r1/exp_name/global_step_1/actor
 ```
 
-## Evaluation
-We provide the instruction on evaluating models on our `LongVideo-Reason` benchmark in the `eval` [directory](https://github.com/NVlabs/Long-RL/tree/main/eval). 
+## LongVideo-Reason
+We provide detailed instructions on the data generation process and how to evaluate models on our `LongVideo-Reason` benchmark in the [`longvideo-reason`](longvideo-reason/) directory. 
 
 ## Examples
 <div align="center">
