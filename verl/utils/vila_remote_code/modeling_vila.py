@@ -63,7 +63,7 @@ from .conversation import SeparatorStyle, default_conversation
 from .distributed import all_gather as vila_all_gather
 from .loss import soft_cross_entropy
 from .media import extract_media
-from .media_encoder import BasicImageEncoder, BasicVideoEncoder
+from .media_encoder import BasicImageEncoder, BasicVideoEncoder, TSPVideoEncoder
 from .mm_utils import process_image, process_images
 from .model_utils_packing import set_seqlens_in_batch
 from .siglip_encoder import SiglipVisionTower, SiglipVisionTowerDynamicS2, SiglipVisionTowerS2
@@ -230,10 +230,11 @@ class VILAPretrainedModel(PreTrainedModel):
         self.llm, self.tokenizer = self.init_llm(llm_cfg, config, device_map=device_map)
         self.llm_model_embed_tokens = self.llm.model.embed_tokens
 
+        use_tsp_encoder = getattr(config, "use_tsp_encoder", False)
         # NOTE(ligeng): hard code to set padding_side to left
         self.tokenizer.padding_side = "left"
         # TODO(ligeng): need to add other decoders from config
-        self.encoders = {"image": BasicImageEncoder(self), "video": BasicVideoEncoder(self)}
+        self.encoders = {"image": BasicImageEncoder(self), "video": TSPVideoEncoder(self) if use_tsp_encoder else BasicVideoEncoder(self)}
 
         self.post_config()
         self.is_loaded = True
@@ -737,6 +738,11 @@ class VILAForCausalLM(VILAPretrainedModel):
                     dummy = torch.zeros(infos[0]["shape"], dtype=infos[0]["dtype"], device=self.device)
                     embeds["dummy"].extend(self.encoders[name]([dummy], media_config[name]))
                     continue
+
+            if len(media[name][0].shape)==2:
+                embeds[name] = deque(media[name])
+                print("Use cached embedding, skip encoding")
+                continue
 
             frames_split = -1
             if "frames_split" in media_config[name]:
