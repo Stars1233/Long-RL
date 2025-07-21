@@ -517,7 +517,7 @@ class RayPPOTrainer:
                 # pop those keys for generation
                 gen_batch = new_batch.pop(
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "ground_truth"],
                     meta_info_keys=["min_pixels", "max_pixels"],
                 )
 
