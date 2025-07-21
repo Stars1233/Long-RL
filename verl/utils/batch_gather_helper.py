@@ -39,7 +39,7 @@ def chunk_dict_list(input_list, num_chunk_seq):
         chunks = torch.chunk(video, num_chunk_seq, dim=0)
 
         for chunk in chunks:
-            new_d = dict(d)  # 浅拷贝
+            new_d = dict(d)
             new_d["pixel_values_videos"] = chunk
             new_list.append(new_d)
     return new_list

@@ -88,7 +88,8 @@ def process_image(
     return image
 
 QUESTION_TEMPLATE_IMAGE = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given image, and then provide the final number. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.\n\n Question: {question}"
-QUESTION_TEMPLATE_VIDEO = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given video, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> the letter of your choice (A, B, C, or D) </answer>.\n\n Question: {question}"
+QUESTION_TEMPLATE_VIDEO = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given video, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.\n\n Question: {question}"
+QUESTION_TEMPLATE_VIDEO_QWEN = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given video, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> the letter of your choice (A, B, C, or D) </answer>.\n\n Question: {question}"
 QUESTION_TEMPLATE_OMNI = "Please first think deeply about the question based on the given video and audio, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> the letter of your choice (A, B, C, or D) </answer>.\n\n Question: {question}"
 
 
@@ -286,7 +287,7 @@ class RLHFDataset(Dataset):
             assert isinstance(video, str), "Only support video path input"
             if self.video_dir is not None:  # video paths
                 video = os.path.join(self.video_dir, video)
-            prompt_str = QUESTION_TEMPLATE_VIDEO.format(question=example[self.prompt_key])
+            prompt_str = QUESTION_TEMPLATE_VIDEO_QWEN.format(question=example[self.prompt_key])
             content = [{"type": "video", "video": video, "nframes": self.processor.num_video_frames}, {"type": "text", "text": prompt_str}]
             if "resized_height" in self.video_hw and "resized_width" in self.video_hw:
                 content[0]["resized_height"] = self.video_hw["resized_height"]
@@ -327,14 +328,8 @@ class RLHFDataset(Dataset):
             if self.cache_dir is not None:
                 cache_path = os.path.join(self.cache_dir, example[self.video_key].split(".")[0]+".pt")
                 if os.path.exists(cache_path):
-                    video_cache = torch.load(cache_path)
-                    video_cache_frames = video_cache.size(0)
-                    if self.processor.num_video_frames != video_cache_frames:
-                        print("Disable using cache video, because the requires num of video frames %d should equal to the cached frames %d" % (self.processor.num_video_frames, video_cache_frames))
-                        self.cache_dir = None
-                    else:
-                        videos_cache.append(video_cache.float() / 255 * 2 - 1)
-                        self.processor.config.num_video_frames = 1
+                    videos_cache.append(torch.load(cache_path, map_location=torch.device('cpu')))
+                    self.processor.config.num_video_frames = 1
 
             messages = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.processor(text=[messages], return_tensors="pt")
