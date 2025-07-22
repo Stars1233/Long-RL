@@ -233,9 +233,9 @@ def _load_video(video_path, num_frames):
     return images
 
 
-def _extract_video(video: Video, config: PretrainedConfig) -> List[PIL.Image.Image]:
+def _extract_video(video: dict, config: PretrainedConfig) -> List[PIL.Image.Image]:
     num_frames = config.num_video_frames
-    frames = _load_video(video.path, num_frames=num_frames)
+    frames = _load_video(video['path'], num_frames=num_frames)
     return frames
 
 
@@ -260,7 +260,7 @@ def extract_media(
                 else:
                     media["image"].append(_extract_image(part))
                 text += MEDIA_TOKENS["image"]
-            elif isinstance(part, Video):
+            elif isinstance(part, dict):
                 if draft:
                     media["video"].append(part)
                 else:
