@@ -25,7 +25,7 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
 <img src="assets/Efficiency-comparison2.png" alt="Stanford-Alpaca" style="width: 100%; min-width: 300px; display: block; margin: auto;">
 </p>
 
-| Models             | VideoMME (w/o sub) | VideoMME (w sub) | ActivityNet-QA (test) | LongVideoBench (val) | PerceptionTest (val) | NExT-QA  | VNBench (val) |
+| Models             | VideoMME (w/o sub) | VideoMME (w sub) | ActivityNet-QA (test) | LongVideoBench (val) | PerceptionTest (val) | NExT-QA (mc) | VNBench (val) |
 |:-------------------|:------------------:|:----------------:|:---------------------:|:--------------------:|:--------------------:|:--------:|:-------------:|
 | **LongVILA-7B**    |      **60.1**      |     **65.1**     |       **59.5**        |       **57.1**       |       **58.1**       | **80.7** |   **63.0**    |
 | **LongVILA-R1-7B** |      **65.0**      |     **70.7**     |       **64.8**        |       **58.0**       |       **68.9**       | **81.5** |   **75.5**    |
