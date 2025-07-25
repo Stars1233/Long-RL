@@ -8,7 +8,7 @@
 [![Code](https://img.shields.io/badge/GitHub-Long%20RL-blue)](https://github.com/NVlabs/Long-RL)
 [![Model](https://img.shields.io/badge/HuggingFace-Model-yellow)](https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B)
 [![Video](https://img.shields.io/badge/YouTube-Video-red)](https://www.youtube.com/watch?v=ykbblK2jiEg)
-[![Demo](https://img.shields.io/badge/Gradio-Demo-bron)](https://6d8b5579459b555d59.gradio.live)
+[![Demo](https://img.shields.io/badge/Gradio-Demo-bron)](https://long-rl.hanlab.ai)
 
 <div align="center">
 
@@ -45,8 +45,8 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
 12. [Acknowledgement](#acknowledgement)
 
 ## News
-- [x] [2025.7.24] We release a gradio [demo](https://6d8b5579459b555d59.gradio.live) with our LongVILA-R1-7B model deployed.
-- [x] [2025.7.24] We release the model weights of LongVILA-R1-7B on [HuggingFace](https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.0% / 70.7%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
+- [x] [2025.7.24] We release a gradio demo (https://long-rl.hanlab.ai) with our LongVILA-R1-7B model deployed.
+- [x] [2025.7.24] We release the model weights of LongVILA-R1-7B on HuggingFace (https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.0% / 70.7%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
 - [x] [2025.7.19] We release a detailed instruction and scripts for the data generation process of our LongVideo-Reason dataset in the [`longvideo-reason`](longvideo-reason/) directory.
 - [x] [2025.7.18] We release new supported features, including *Open-ended reward*, *Cached video embeddings*, and *Chunked gathering* as introduced in [Supported Features](#supported-features).
 - [x] [2025.7.10] We release [Paper](https://arxiv.org/abs/2507.07966) and this GitHub repo [Long-RL](https://github.com/NVlabs/Long-RL).
