@@ -34,19 +34,21 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
 1. [News](#news)
 2. [Highlights](#highlights)
 3. [Introduction](#introduction)
-4. [Supported Features](#supported-features)
-5. [Installation](#installation)
-6. [Training](#training)
-7. [LongVideo-Reason](#longvideo-reason)
-8. [Examples](#examples)
-9. [How to contribute](#how-to-contribute)
-10. [Core Contributors](#core-Contributors)
-11. [Citation](#citation)
-12. [Acknowledgement](#acknowledgement)
+4. [LongVILA-R1 Model Usage](#longvila-r1-model-usage)
+5. [Supported Features](#supported-features)
+6. [Installation](#installation)
+7. [Training](#training)
+8. [LongVideo-Reason](#longvideo-reason)
+9. [Examples](#examples)
+10. [How to contribute](#how-to-contribute)
+11. [Core Contributors](#core-Contributors)
+12. [Citation](#citation)
+13. [Acknowledgement](#acknowledgement)
 
 ## News
+- [x] [2025.7.27] **LongVILA-R1-7B** supports processing up to **2,048** video frames per video, with configurable FPS settings. Please refer to its usage example.
 - [x] [2025.7.24] We release a gradio demo (https://long-rl.hanlab.ai) with our LongVILA-R1-7B model deployed.
-- [x] [2025.7.24] We release the model weights of LongVILA-R1-7B on HuggingFace (https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.0% / 70.7%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
+- [x] [2025.7.24] We release the model weights of **LongVILA-R1-7B** on HuggingFace (https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.0% / 70.7%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
 - [x] [2025.7.19] We release a detailed instruction and scripts for the data generation process of our LongVideo-Reason dataset in the [`longvideo-reason`](longvideo-reason/) directory.
 - [x] [2025.7.18] We release new supported features, including *Open-ended reward*, *Cached video embeddings*, and *Chunked gathering* as introduced in [Supported Features](#supported-features).
 - [x] [2025.7.10] We release [Paper](https://arxiv.org/abs/2507.07966) and this GitHub repo [Long-RL](https://github.com/NVlabs/Long-RL).
@@ -75,6 +77,81 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
   - `examples/new_supports/qwen2_5_vl_3b_video_dapo.sh`
   - `examples/new_supports/qwen2_5_vl_3b_video_grpo.sh`
   - `examples/new_supports/qwen2_5_vl_3b_video_reinforce.sh`
+
+## LongVILA-R1 Model Usage
+
+### General Inference
+```python
+from transformers import AutoModel
+
+model_path = "Efficient-Large-Model/LongVILA-R1-7B"
+model = AutoModel.from_pretrained(model_path, trust_remote_code=True, device_map="auto")
+
+# You can adjust the FPS value as needed. 
+# To disable FPS control, set it to 0 and manually specify the number of processed video frames via `num_video_frames`.
+# Example:
+# model.config.fps = 8.0
+# model.config.num_video_frames, model.config.fps = 512, 0
+
+
+use_thinking = True # Switching between thinking and non-thinking modes
+system_prompt_thinking = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given video, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.\n\n Question: {question}"
+
+prompt = "What is the main purpose of the video?"
+video_path = "video.mp4"
+
+if use_thinking:
+  prompt = system_prompt_thinking.format(question=prompt)
+
+response = model.generate_content([prompt, {"path": video_path}])
+print("Response: ", response)
+```
+
+### with vLLM engine
+Tested on `vllm==0.9.1`. We need to get the remote code first.
+```bash
+mkdir remote_code
+cp path_to/Efficient-Large-Model/LongVILA-R1-7B/*.py remote_code
+```
+Then, you can use the following code for model generation.
+```python
+import os
+from transformers import AutoModel
+from vllm import LLM, SamplingParams
+from remote_code.media import extract_media
+from remote_code.mm_utils import process_images
+from remote_code.tokenizer_utils import tokenize_conversation
+
+model_path = "path_to/Efficient-Large-Model/LongVILA-R1-7B"
+
+model_encoder = AutoModel.from_pretrained(model_path, trust_remote_code=True, device_map="auto", llm_only_need_embed=True)
+# you can change gpu_memory_utilization according to GPU memory
+llm = LLM(model=os.path.join(model_path, "llm"), enable_prompt_embeds=True, gpu_memory_utilization=0.5)
+
+use_thinking = True # Switching between thinking and non-thinking modes
+system_prompt_thinking = "You are a helpful assistant. The user asks a question, and then you solves it.\n\nPlease first think deeply about the question based on the given video, and then provide the final answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>.\n\n Question: {question}"
+
+prompt = "What is the main purpose of the video?"
+video_path = "video.mp4"
+
+if use_thinking:
+  prompt = system_prompt_thinking.format(question=prompt)
+
+conversation = [{"from": "human", "value": [prompt, {"path": video_path}]}]
+media = extract_media(conversation, model_encoder.config)
+input_ids = tokenize_conversation(conversation, model_encoder.tokenizer, add_generation_prompt=True).unsqueeze(0).cuda()
+media["video"] = [
+    process_images(images, model_encoder.vision_tower.image_processor, model_encoder.config).half()
+    for images in media["video"]
+]
+
+inputs_embeds, _, _ = model_encoder._embed(input_ids, media, {"video": {}}, None, None)
+
+completions = llm.generate(prompts=[{"prompt_embeds": inputs_embeds.squeeze(0)}], sampling_params=SamplingParams(max_tokens=1024))
+response = completions[0].outputs[0].text
+print("Response: ", response)
+```
+
 
 ## Supported Features
 - [x] **Open-ended reward**: 
