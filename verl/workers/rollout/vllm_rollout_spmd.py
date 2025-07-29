@@ -352,6 +352,6 @@ class vLLMRollout(BaseRollout):
             non_tensor_batch["rewards"] = rewards
 
         non_tensor_batch["ground_truth"] = ground_truth
-        prompts.meta_info["num_repeat"] = self.sampling_params.n
+        #prompts.meta_info["num_repeat"] = self.sampling_params.n
         prompts.meta_info["num_chunk_seq"] = self.num_chunk_seq
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info=prompts.meta_info)
