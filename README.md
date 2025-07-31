@@ -28,7 +28,7 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
 | Models             | VideoMME (w/o sub) | VideoMME (w sub) | ActivityNet-QA (test) | LongVideoBench (val) | PerceptionTest (val) | NExT-QA (mc) | VNBench (val) |
 |:-------------------|:------------------:|:----------------:|:---------------------:|:--------------------:|:--------------------:|:--------:|:-------------:|
 | **LongVILA-7B**    |      **60.1**      |     **65.1**     |       **59.5**        |       **57.1**       |       **58.1**       | **80.7** |   **63.0**    |
-| **LongVILA-R1-7B** |      **65.0**      |     **70.7**     |       **64.8**        |       **58.0**       |       **68.9**       | **81.5** |   **75.5**    |
+| **LongVILA-R1-7B** |      **65.1**      |     **71.1**     |       **64.8**        |       **58.0**       |       **68.9**       | **81.5** |   **75.5**    |
 
 ## TABLE OF CONTENTS
 1. [News](#news)
@@ -46,9 +46,9 @@ We introduce a full-stack framework that scales up reasoning in vision-language 
 13. [Acknowledgement](#acknowledgement)
 
 ## News
-- [x] [2025.7.27] **LongVILA-R1-7B** supports processing up to **2,048** video frames per video, with configurable FPS settings. Please refer to its [usage instructions](#longvila-r1-model-usage).
+- [x] [2025.7.30] **LongVILA-R1-7B** supports processing up to **8,192** video frames per video, with configurable FPS settings. Please refer to its [usage instructions](#longvila-r1-model-usage).
 - [x] [2025.7.24] We release a gradio demo (https://long-rl.hanlab.ai) with our LongVILA-R1-7B model deployed.
-- [x] [2025.7.24] We release the model weights of **LongVILA-R1-7B** on HuggingFace (https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.0% / 70.7%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
+- [x] [2025.7.24] We release the model weights of **LongVILA-R1-7B** on HuggingFace (https://huggingface.co/Efficient-Large-Model/LongVILA-R1-7B). LongVILA-R1-7B achieves **65.1% / 71.1%** on VideoMME. It supports reasoning on both **multiple-choice** and **open-ended** questions, and can also switch to non-thinking mode.
 - [x] [2025.7.19] We release a detailed instruction and scripts for the data generation process of our LongVideo-Reason dataset in the [`longvideo-reason`](longvideo-reason/) directory.
 - [x] [2025.7.18] We release new supported features, including *Open-ended reward*, *Cached video embeddings*, and *Chunked gathering* as introduced in [Supported Features](#supported-features).
 - [x] [2025.7.10] We release [Paper](https://arxiv.org/abs/2507.07966) and this GitHub repo [Long-RL](https://github.com/NVlabs/Long-RL).
