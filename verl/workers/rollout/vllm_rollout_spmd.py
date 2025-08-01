@@ -210,10 +210,10 @@ class vLLMRollout(BaseRollout):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
         # TODO: collect input embeds for reuse
+        batch_multi_modal_embeds = []
         if batch_multi_modal_data is not None:
             min_pixels, max_pixels = prompts.meta_info["min_pixels"], prompts.meta_info["max_pixels"]
             vllm_inputs = []
-            batch_multi_modal_embeds = []
             for raw_prompt_ids, multi_modal_data in zip(batch_raw_prompt_ids, batch_multi_modal_data):
                 if self.vila_model:
                     _raw_prompt_ids = torch.Tensor(list(raw_prompt_ids)).long().unsqueeze(0).to(self.model_vision_encoder.device)
